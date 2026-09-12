@@ -49,7 +49,6 @@ Rather than sending raw prompts directly to an LLM, the system routes natural-la
     Unsafe (no): Routes to cancelled_sql to return a clear justification without querying the database.
 
 3. ETL Analyst Sub-Agent
-
     Design Pattern: Tool-Calling ReAct Loop (Reasoning + Acting).
 
     Role: Handles ad-hoc API ingestion, format conversions, and data cleaning/filtering pipelines.
