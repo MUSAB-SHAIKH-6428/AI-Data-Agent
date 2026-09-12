@@ -5,6 +5,10 @@ from psycopg2 import sql
 from dotenv import load_dotenv
 load_dotenv()
 
+"""
+    Enabling the connection and loading the data in database from csv
+"""
+
 DB_CONFIG = {
     "host": os.getenv('DB_HOST'),
     "port": int(os.getenv('DB_PORT')),

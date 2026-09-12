@@ -12,7 +12,7 @@ load_dotenv()
 
 def pick_llm(model_level: str):
     level = model_level.lower().strip()
-
+    # assigning different llm of same AI 
     if level == "low":
         llm = ChatGoogleGenerativeAI(model="gemini-3.1-flash-lite", temperature=0)
     elif level == "medium":

@@ -1,6 +1,10 @@
 import psycopg2
 
+# Connecting to database
+# Defining items for llm to generate sql query
+# after finalizing the query safety execution starts
 class DatabaseUtil:
+    
     def __init__(self, db_config):
         self.db_config = db_config
         try:
