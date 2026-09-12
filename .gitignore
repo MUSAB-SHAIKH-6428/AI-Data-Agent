@@ -1,4 +1,5 @@
 .env
+.txt/
 .venv/
 __pycache__/
 *.pycgit check-ignore -v .env

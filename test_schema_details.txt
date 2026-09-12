@@ -1,0 +1,74 @@
+Database Schema : public
+Table : users
+Column: user_id, Data Type: integer
+Column: first_name, Data Type: character varying
+Column: last_name, Data Type: character varying
+Column: email, Data Type: character varying
+Column: phone, Data Type: character varying
+Column: city, Data Type: character varying
+Column: province, Data Type: character varying
+Column: user_type, Data Type: character varying
+Column: signup_date, Data Type: date
+Column: is_active, Data Type: boolean
+  Sample Data:
+    (1, 'Danielle', 'Johnson', 'user1@example.com', '+13567729816', 'Halifax', 'NS', 'rider', datetime.date(2025, 5, 25), True)
+    (2, 'Joshua', 'Walker', 'user2@example.com', '+19222900764', 'Vancouver', 'BC', 'rider', datetime.date(2025, 5, 4), True)
+    (3, 'Jill', 'Rhodes', 'user3@example.com', '+12900432998', 'Winnipeg', 'MB', 'rider', datetime.date(2026, 5, 24), True)
+Table : vehicles
+Column: vehicle_id, Data Type: integer
+Column: driver_id, Data Type: integer
+Column: make, Data Type: character varying
+Column: model, Data Type: character varying
+Column: year, Data Type: integer
+Column: license_plate, Data Type: character varying
+Column: color, Data Type: character varying
+Column: is_active, Data Type: boolean
+  Sample Data:
+    (1, 7, 'Honda', 'CR-V', 2024, 'OP331', 'Grey', True)
+    (2, 10, 'Hyundai', 'Sonata', 2026, 'WK520', 'Black', True)
+    (3, 19, 'Ford', 'Fusion', 2022, 'LI224', 'Black', True)
+Table : rides
+Column: ride_id, Data Type: integer
+Column: rider_id, Data Type: integer
+Column: driver_id, Data Type: integer
+Column: requested_at, Data Type: timestamp without time zone
+Column: pickup_time, Data Type: timestamp without time zone
+Column: dropoff_time, Data Type: timestamp without time zone
+Column: pickup_latitude, Data Type: numeric
+Column: pickup_longitude, Data Type: numeric
+Column: dropoff_latitude, Data Type: numeric
+Column: dropoff_longitude, Data Type: numeric
+Column: distance_km, Data Type: numeric
+Column: fare, Data Type: numeric
+Column: surge_multiplier, Data Type: numeric
+Column: status, Data Type: character varying
+Column: cancellation_reason, Data Type: character varying
+  Sample Data:
+    (1, 6166, 7514, datetime.datetime(2026, 2, 27, 20, 13, 30), None, None, Decimal('44.229291'), Decimal('-63.543162'), Decimal('44.496423'), Decimal('-67.980735'), Decimal('0.00'), Decimal('0.00'), Decimal('1.00'), 'cancelled', 'driver_cancelled')
+    (2, 5074, 4936, datetime.datetime(2025, 12, 26, 8, 26, 37), datetime.datetime(2025, 12, 26, 8, 34, 37), datetime.datetime(2025, 12, 26, 8, 59, 37), Decimal('43.881270'), Decimal('-70.083206'), Decimal('43.410488'), Decimal('-70.560855'), Decimal('13.16'), Decimal('52.17'), Decimal('1.50'), 'completed', None)
+    (3, 2969, 5849, datetime.datetime(2025, 7, 3, 7, 58, 26), datetime.datetime(2025, 7, 3, 8, 2, 26), datetime.datetime(2025, 7, 3, 9, 2, 26), Decimal('43.856247'), Decimal('-75.945737'), Decimal('44.133943'), Decimal('-70.313959'), Decimal('26.59'), Decimal('70.53'), Decimal('1.00'), 'completed', None)
+Table : payments
+Column: payment_id, Data Type: integer
+Column: ride_id, Data Type: integer
+Column: user_id, Data Type: integer
+Column: amount, Data Type: numeric
+Column: payment_method, Data Type: character varying
+Column: payment_status, Data Type: character varying
+Column: transaction_id, Data Type: character varying
+Column: payment_time, Data Type: timestamp without time zone
+  Sample Data:
+    (1, 13960, 6945, Decimal('16.07'), 'credit_card', 'completed', 'TXN-00000001', datetime.datetime(2026, 4, 7, 15, 15, 52))
+    (2, 1187, 5541, Decimal('47.01'), 'debit_card', 'completed', 'TXN-00000002', datetime.datetime(2025, 10, 7, 14, 56, 33))
+    (3, 3719, 8738, Decimal('74.77'), 'paypal', 'completed', 'TXN-00000003', datetime.datetime(2026, 1, 14, 16, 19, 32))
+Table : ratings
+Column: rating_id, Data Type: integer
+Column: ride_id, Data Type: integer
+Column: rider_id, Data Type: integer
+Column: driver_id, Data Type: integer
+Column: rating, Data Type: integer
+Column: comment, Data Type: text
+Column: rated_at, Data Type: timestamp without time zone
+  Sample Data:
+    (1, 13870, 5833, 7667, 5, 'Could have been better', datetime.datetime(2025, 9, 9, 13, 41, 28))
+    (2, 2279, 1026, 3147, 4, 'Could have been better', datetime.datetime(2026, 6, 2, 23, 39, 31))
+    (3, 19701, 960, 2267, 5, 'Great ride', datetime.datetime(2026, 7, 23, 6, 31, 59))
