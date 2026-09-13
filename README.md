@@ -1,66 +1,92 @@
-# 🏗️ System Architecture: Ola AI Data Agent
+# Ola AI Data Agent
 
-Rather than sending raw prompts directly to an LLM, the system routes natural-language business requests through specialized sub-agents with strict state boundaries, deterministic security checks, and targeted model tiering.
+Building an AI Data Agent to handle questions and data operations on an Ola rides database. Instead of just dumping a prompt to an LLM and hoping for the best, we break the work down into specialized agents with proper guards, schema context, and validation.
 
 ---
 
-## 📐 High-Level Architecture
+## Where We Are Right Now: SQL Analyst Agent 🎯
+
+We just finished building and testing the **SQL Analyst Agent** (`agents/sql_analyst.py`). 
+
+It takes a user's question, inspects the live PostgreSQL database, writes the SQL query, checks whether it's safe to run, executes it, and explains the result in simple terms.
+
+Here is the compiled LangGraph workflow:
+
+![SQL Analyst Graph](sql_analyst_graph.png)
+
+---
+
+## How the SQL Analyst Works (Step-by-Step)
+
+1. **`curate_ques`**
+   Takes the raw user question and cleans it up into a clear, well-phrased business question using a light LLM.
+
+2. **`prompt_query_context`**
+   Connects to Postgres and pulls live schema details (table names, column names, data types, and sample rows) directly from `information_schema`. This gives the LLM the exact context so it doesn't hallucinate table or column names.
+
+3. **`generate_sql`**
+   Feeds the schema and curated question into the model to write the Postgres query. It defaults to a `LIMIT 10` safeguard so we don't accidentally dump thousands of rows.
+
+4. **`is_safe_sql` (The Judge)**
+   Before anything touches the database, a judge LLM evaluates the query using structured output (`JudgeSchema`). It checks if the query only reads data (`SELECT`). If there's any dangerous operation like `DROP`, `DELETE`, `UPDATE`, `INSERT`, or `TRUNCATE`, it flags it as unsafe (`No`).
+
+5. **Branching**:
+   - **Safe (`Yes`)** -> moves to `execute_sql`, runs the query with `psycopg2`, and passes the output to `represent_final_answer`.
+   - **Unsafe (`No`)** -> moves to `canceled_sql`, stops execution, and explains why the query was rejected without touching the database.
+
+6. **`represent_final_answer`**
+   Takes the SQL execution result and user question, then writes a friendly, plain English summary of the findings.
+
+---
+
+## Project Structure
 
 ```text
-                          +------------------------+
-                          |   User / Stakeholder   |
-                          +-----------+------------+
-                                      |
-                                      v
-                          +------------------------+
-                          |       Data Agent       |
-                          |     (Router Node)      |
-                          +-----+------------+-----+
-                                |            |
-         [SQL / Database Query] |            | [ETL / API / File Transform]
-                                v            v
-                    +----------------+  +----------------+
-                    |  SQL Analyst   |  |  ETL Analyst   |
-                    | (Stateful DAG) |  | (ReAct Agent)  |
-                    +-------+--------+  +-------+--------+
-                            |                   |
-                            v                   v
-                      PostgreSQL DB        REST APIs &
-                      (Ola Ride DB)        Data Storage
+AI-Data-Agent/
+├── Model/
+│   └── Schema.py            # Pydantic schemas for agent state & judge
+├── agents/
+│   ├── sql_analyst.py       # SQL Analyst LangGraph workflow (Working!)
+│   ├── etl_analyst.py       # ETL agent (up next)
+│   └── data_agent.py        # Main router agent (up next)
+├── utils/
+│   ├── database.py          # Postgres connection & query runner
+│   └── llm_pick.py          # Helper to pick Gemini models (low/med/high)
+├── data/                    # Sample CSV datasets (users, rides, payments, etc.)
+├── feed_db.py               # Script to load CSV data into Postgres
+├── sql_analyst_graph.png    # Mermaid graph export of the SQL agent
+└── README.md
 ```
 
-### Core Architecture Components 
+---
 
-1. Main and Decision Maker Data AGent
-2. SQL Analyst Sub-Agent
-## Execution PIPELINE : 
-    curate_question: Cleans unformatted, informal prompts into crisp business queries.
+## Quick Setup & Running
 
-    prompt_query_context (Context Engineering): Queries PostgreSQL's information_schema at runtime to extract live tables, column types, constraints, and 5 sample rows per table, eliminating hallucinations.
+1. **Setup environment & dependencies**
+   ```bash
+   uv sync
+   # or with standard venv:
+   # pip install -r requirements.txt
+   ```
 
-    generate_sql: Uses a specialized coding model tier to generate syntactically strict PostgreSQL queries with a mandatory row limit guardrail (LIMIT 10).
+2. **Setup `.env`**
+   ```env
+   GEMINI_API_KEY=your_key_here
+   DB_HOST=localhost
+   DB_PORT=5432
+   DB_NAME=ola_db
+   DB_USER=postgres
+   DB_PASSWORD=your_password
+   ```
 
-    is_safe (AI-as-a-Judge): Intercepts generated SQL prior to execution using JudgeSchema to enforce a read-only policy. Only SELECT statements are permitted; destructive commands (DROP, DELETE, UPDATE, INSERT) are flagged as unsafe.
+3. **Run the SQL Analyst**
+   ```bash
+   python agents/sql_analyst.py
+   ```
 
-    Branching:
+---
 
-    Safe (yes): Proceeds to execute_sql via psycopg2, executes against PostgreSQL, and passes output to represent_final_answer.
+## What's Next 🚀
 
-    Unsafe (no): Routes to cancelled_sql to return a clear justification without querying the database.
-
-3. ETL Analyst Sub-Agent
-    Design Pattern: Tool-Calling ReAct Loop (Reasoning + Acting).
-
-    Role: Handles ad-hoc API ingestion, format conversions, and data cleaning/filtering pipelines.
-
-    Execution Pipeline:
-
-    Tool Binding: Binds atomic Python utilities (extract_load_tool, transform_load_tool) decorated with @tool to the LLM.
-
-    Tool Execution: LLM inspects input paths, formats, and destinations, emitting a structured tool_call.
-
-    Observation Feedback: The custom tool_node executes the respective Python function (requests, pandas, exec), wraps the execution log as a ToolMessage, and routes back to the LLM until the pipeline finishes.
-
-
-## C:\Users\MUSAB\Desktop\AI-Data-Agent\sql_analyst_graph.png 
-(((---use this path and add the picture in repo  )))
+- **ETL Analyst Sub-Agent**: Tool-calling ReAct agent to handle file transformations, API calls, and data pipelines.
+- **Main Data Agent**: The top-level router that takes any user request and decides whether to send it to the SQL Analyst or the ETL Analyst.
