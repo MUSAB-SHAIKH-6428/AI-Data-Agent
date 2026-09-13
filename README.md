@@ -60,3 +60,7 @@ Rather than sending raw prompts directly to an LLM, the system routes natural-la
     Tool Execution: LLM inspects input paths, formats, and destinations, emitting a structured tool_call.
 
     Observation Feedback: The custom tool_node executes the respective Python function (requests, pandas, exec), wraps the execution log as a ToolMessage, and routes back to the LLM until the pipeline finishes.
+
+
+## C:\Users\MUSAB\Desktop\AI-Data-Agent\sql_analyst_graph.png 
+(((---use this path and add the picture in repo  )))

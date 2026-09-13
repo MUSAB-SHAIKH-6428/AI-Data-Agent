@@ -4,9 +4,10 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from utils.llm_pick import pick_llm
-from utils import DatabaseUtil
-from langchain_core.messages import HumanMessage
-from Model.Schema import AgentSchema
+from utils.database import DatabaseUtil
+from langchain_core.messages import HumanMessage, AIMessage
+from Model.Schema import AgentSchema, JudgeSchema
+from langgraph.graph import StateGraph, START, END 
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -27,14 +28,14 @@ def curate_ques(state: AgentSchema) -> AgentSchema:
 
     llm = pick_llm("low")
 
-    response = llm.invoke(f"Curate the following Question {user_question}").content
+    response = str(llm.invoke(f"Curate the following Question {user_question}").content)
 
     state.curated_ques = response
-    state.messages = state.message + [HumanMessage(content=f"{response}")]
+    state.messages = state.messages + [HumanMessage(content=f"{response}")]
     return state
 
 def prompt_query_context(state: AgentSchema) -> AgentSchema:
-    curated_question = state.curate_ques
+    curated_question = state.curated_ques
 
     obj = DatabaseUtil(DB_CONFIG)
     schema_info = obj.schema_details("public")
@@ -141,3 +142,77 @@ def represent_final_answer(state: AgentSchema) -> AgentSchema:
 
 """-----------------------------------------CONSTRUCT CHAT HISTORY-------------------------------------------"""
 
+# WORKFLOW/GRAPH
+
+sql_agent_graph = StateGraph(AgentSchema)
+
+# creating nodes/checkpoints for llm
+sql_agent_graph.add_node(curate_ques,name="curate_ques")
+sql_agent_graph.add_node(prompt_query_context,name="prompt_query_context")
+sql_agent_graph.add_node(generate_sql,name="generate_sql")
+sql_agent_graph.add_node(is_safe_sql,name="is_safe_sql")
+sql_agent_graph.add_node(canceled_sql,name="canceled_sql")
+sql_agent_graph.add_node(execute_sql,name="execute_sql")
+sql_agent_graph.add_node(represent_final_answer,name="represent_final_answer")
+
+
+# connecting all nodes
+
+sql_agent_graph.add_edge(START, "curate_ques")
+sql_agent_graph.add_edge("curate_ques", "prompt_query_context")
+sql_agent_graph.add_edge("prompt_query_context", "generate_sql")
+sql_agent_graph.add_edge("generate_sql", "is_safe_sql")
+
+
+def is_safe_sql_edge(state: AgentSchema)-> str:
+    is_safe = state.is_safe
+
+    if is_safe.lower() == "yes":
+        return "execute_sql"
+
+    else :
+        return "canceled_sql"
+    
+sql_agent_graph.add_conditional_edges("is_safe_sql", is_safe_sql_edge,
+                                      {"execute_sql": "execute_sql",
+                                      "canceled_sql": "canceled_sql"})
+
+
+sql_agent_graph.add_edge("canceled_sql", END)
+sql_agent_graph.add_edge("execute_sql", "represent_final_answer")
+sql_agent_graph.add_edge("represent_final_answer", END)
+
+
+
+sql_analyst = sql_agent_graph.compile()
+
+if __name__ == "__main__":
+
+
+    # Test
+    from IPython.display import display, Image
+    img = Image(sql_analyst.get_graph().draw_mermaid_png())
+    with open("sql_analyst_graph.png", "wb") as f:
+        f.write(img.data)
+
+    input_schema = {
+        "messages": [],
+        "user_question": "What are the different types of Payment Methods we have in our database",
+        "curated_ques": "",
+        "prompt_query_context": "",
+        "generated_sql_query": "",
+        "is_safe": "No",
+        "comments": "",
+        "sql_query_execution_result": "",
+        "final_answer": ""
+    }
+
+    sql_analyst_response = sql_analyst.invoke(input_schema)
+    print(sql_analyst_response['messages'])
+
+    print(sql_analyst_response['generated_sql_query']) 
+
+    print(sql_analyst_response['sql_query_execution_result'])  
+
+    print(sql_analyst_response['prompt_query_context'])
+""
