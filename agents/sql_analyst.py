@@ -28,7 +28,7 @@ def curate_ques(state: AgentSchema) -> AgentSchema:
 
     llm = pick_llm("low")
 
-    response = str(llm.invoke(f"Curate the following Question {user_question}").content)
+    response = str(llm.invoke(f"Curate the following Question {user_question}").text)
 
     state.curated_ques = response
     state.messages = state.messages + [HumanMessage(content=f"{response}")]
@@ -64,10 +64,9 @@ def prompt_query_context(state: AgentSchema) -> AgentSchema:
 def generate_sql(state: AgentSchema) -> AgentSchema:
 
     prompt = state.prompt_query_context
-    llm = pick_llm("high")  
-    generated_sql_query = llm.invoke(prompt).content  
-
-    state.generated_sql_query = generated_sql_query
+    llm = pick_llm("high")
+    raw_query = str(llm.invoke(prompt).text).strip()
+    state.generated_sql_query = raw_query.replace("```sql", "").replace("```", "").strip()
     return state
 
 def is_safe_sql(state: AgentSchema) -> AgentSchema:
@@ -111,7 +110,7 @@ def execute_sql(state: AgentSchema) -> AgentSchema:
     obj = DatabaseUtil(DB_CONFIG)
 
     execution_result = obj.execute_sql(sql_query)  
-    state.sql_query_execution_result = execution_result
+    state.sql_query_execution_result = str(execution_result or "Execution failed")
 
     return state
 
@@ -132,7 +131,7 @@ def represent_final_answer(state: AgentSchema) -> AgentSchema:
     Here is the user's original question: {curated_question}
     """
 
-    llm_response = llm.invoke(prompt).content  
+    llm_response = str(llm.invoke(prompt).text)
 
     state.final_answer = llm_response
     state.messages = state.messages + [AIMessage(content=f"{llm_response}")]  
