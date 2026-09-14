@@ -21,7 +21,7 @@ DB_CONFIG = {
 }
 
 
-# -------------------------------------------AI AGENT CODE-------------------------------------------
+# -------------------------------------------SQL AGENT CODE-------------------------------------------
 
 def curate_ques(state: AgentSchema) -> AgentSchema:
     user_question = state.user_question
