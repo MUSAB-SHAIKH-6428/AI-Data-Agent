@@ -1,68 +1,138 @@
 # Ola AI Data Agent
 
-Building an AI Data Agent to handle questions and data operations on an Ola rides database. Instead of just dumping a prompt to an LLM and hoping for the best, we break the work down into specialized agents with proper guards, schema context, and validation.
+Building an end-to-end AI Data Agent system to handle analytics and data operations on an Ola rides database. Instead of just sending a raw prompt to an LLM and hoping for the best, we break the system down into specialized sub-agents with strict guards, live database context, and an automated router.
+
+## System Architecture
+
+Here is the complete hierarchy:
+
+```text
+                           +------------------------+
+                           |   User / Stakeholder   |
+                           +-----------+------------+
+                                       |
+                                       v
+                           +------------------------+
+                           |       Data Agent       |
+                           |     (Router Node)      |
+                           +-----+------------+-----+
+                                 |            |
+          [SQL / Database Query] |            | [ELT / API / File Transform]
+                                 v            v
+                     +----------------+  +----------------+
+                     |  SQL Analyst   |  |  ELT Analyst   |
+                     | (Stateful DAG) |  | (ReAct Agent)  |
+                     +-------+--------+  +-------+--------+
+                             |                   |
+                             v                   v
+                       PostgreSQL DB        REST APIs &
+                       (Ola Ride DB)        Data Storage
+```
 
 ---
 
-## Where We Are Right Now 🎯
+## 1. Main Data Agent (The Router)
 
-We have successfully built and tested two core sub-agents:
-1. **SQL Analyst Agent** (`agents/sql_analyst.py`) - Queries the PostgreSQL database safely.
-2. **ELT Analyst Agent** (`agents/etl_analyst.py`) - Extracts API data and runs Pandas transformations.
+The **Data Agent** (`agents/data_agent.py`) is the entry point. It reads the user request and uses Gemini structured output (`RouterSchema`) to classify the task as either `"sql"` or `"etl"`. It then delegates the question to the right sub-agent and returns the final answer.
+
+![Data Agent Graph](data_agent_graph.png)
+
+### How It Works
+1. **`router_node`**: Inspects `state.messages[-1]`, prompts Gemini with `RouterSchema`, and stores the classification (`"sql"` or `"etl"`) in `state.route_response`.
+2. **`route_edge`**: Conditional edge that forwards execution to either `sql_node` or `etl_node`.
+3. **`sql_node`**: Builds the input payload, invokes the compiled `sql_analyst`, and collects the final response.
+4. **`etl_node`**: Dispatches the request to the compiled `etl_analyst` ReAct agent and collects the execution summary.
 
 ---
 
-## 1. SQL Analyst Agent
+## 2. SQL Analyst Agent
 
-It takes a user's natural language question, inspects the live PostgreSQL database schema, writes the SQL query, checks whether it's safe to run, executes it, and explains the result in simple terms.
-
-Here is the compiled LangGraph workflow:
+The **SQL Analyst** (`agents/sql_analyst.py`) takes a natural language question, pulls the live database schema from PostgreSQL, generates the query with safeguards, verifies safety with an AI judge, executes it, and returns a plain English summary.
 
 ![SQL Analyst Graph](sql_analyst_graph.png)
 
-### How the SQL Analyst Works (Step-by-Step)
-
-1. **`curate_ques`**  
-   Takes the raw user question and cleans it up into a clear, well-phrased business question using a light LLM.
-
-2. **`prompt_query_context`**  
-   Connects to Postgres and pulls live schema details (table names, column names, data types, and sample rows) directly from `information_schema`. This gives the LLM the exact context so it doesn't hallucinate table or column names.
-
-3. **`generate_sql`**  
-   Feeds the schema and curated question into the model to write the Postgres query. It defaults to a `LIMIT 10` safeguard so we don't accidentally dump thousands of rows.
-
-4. **`is_safe_sql` (The Judge)**  
-   Before anything touches the database, a judge LLM evaluates the query using structured output (`JudgeSchema`). It checks if the query only reads data (`SELECT`). If there's any dangerous operation like `DROP`, `DELETE`, `UPDATE`, `INSERT`, or `TRUNCATE`, it flags it as unsafe (`No`).
-
-5. **Branching**:  
-   - **Safe (`Yes`)** -> moves to `execute_sql`, runs the query with `psycopg2`, and passes the output to `represent_final_answer`.
-   - **Unsafe (`No`)** -> moves to `canceled_sql`, stops execution, and explains why the query was rejected without touching the database.
-
-6. **`represent_final_answer`**  
-   Takes the SQL execution result and user question, then writes a friendly, plain English summary of the findings.
+### Execution Pipeline
+1. **`curate_ques`**: Cleans and refines the user's raw input into a clear business question.
+2. **`prompt_query_context`**: Queries Postgres `information_schema` at runtime to inject table names, column types, and sample rows into the prompt so the LLM doesn't hallucinate table structures.
+3. **`generate_sql`**: Generates a clean Postgres query with a default `LIMIT 10` guardrail.
+4. **`is_safe_sql` (AI Judge)**: Inspects the generated SQL using `JudgeSchema`. Only `SELECT` statements are permitted. Destructive commands (`DROP`, `DELETE`, `UPDATE`, `INSERT`, `TRUNCATE`) are marked unsafe.
+5. **Branching**:
+   - **Safe (`Yes`)** -> Proceeds to `execute_sql` via `psycopg2` and passes the query output to `represent_final_answer`.
+   - **Unsafe (`No`)** -> Diverts to `canceled_sql` and explains why the query was rejected without touching Postgres.
+6. **`represent_final_answer`**: Translates the raw SQL query results into a clear, non-technical response for the user.
 
 ---
 
-## 2. ELT Analyst Agent
+## 3. ELT Analyst Agent
 
-The **ELT Analyst Agent** is built as a ReAct loop. The LLM acts as a Python Data Analyst with access to custom ELT tools. It decides which tool to call based on the user's request, executes it, checks the output, and responds back.
-
-Here is the compiled LangGraph workflow:
+The **ELT Analyst** (`agents/etl_analyst.py`) is built as a ReAct loop. The model acts as a Python Data Analyst equipped with dedicated tools to fetch data from APIs and run Pandas transformations.
 
 ![ELT Analyst Graph](etl_analyst_graph.png)
 
-### How the ELT Analyst Works
+### How It Works
+1. **`llm_node`**: Evaluates chat history and decides whether a tool is required or if it can provide the final answer.
+2. **`tool_node`**: Executes the requested tool and passes observation output back to the model:
+   - **`extract_load_tool`**: Fetches data from an external REST API endpoint and saves it to disk (`csv`, `json`, or `parquet`).
+   - **`transform_load_tool`**: Reads the top sample rows of a file, prompts the model to write the required Pandas transformation code, and executes it via `ELTTools.execute_code`.
+3. **Loop**: Runs until the tool operations finish, then returns the final message to the user.
 
-1. **`llm_node`**  
-   Takes the user's prompt and chat history. The LLM has tools bound to it (`extract_load_tool` and `transform_load_tool`). If it needs to run an action, it outputs a tool call; otherwise, it provides the final answer and ends.
+---
 
-2. **`tool_node` & Tools**  
-   Executes the requested tool and feeds the observation back to the LLM:
-   - **`extract_load_tool`**: Hits an external API endpoint, fetches the data, and dumps it into the target folder in the requested format (`csv`, `json`, or `parquet`).
-   - **`transform_load_tool`**: Reads sample rows from an existing file to understand its shape, prompts the LLM to generate the exact Pandas transformation code needed, runs that code in a clean execution environment, and saves the transformed file.
+## Verified Test Cases
 
-3. **Conditional Loop**:  
-   If tools were called, the loop routes the result back to `llm_node` so the agent can confirm the task is complete or take next steps. If no more tools are needed, it finishes.
+### Test Case 1: SQL Route (Database Query)
+```python
+response = data_agent.invoke({
+    "messages": [HumanMessage(content="What are the different types of Payment Methods we have in our database?")],
+    "route_response": ""
+})
+```
+* **Router Decision:** `"sql"`
+* **Generated SQL:**
+  ```sql
+  SELECT payment_method, COUNT(*) AS transaction_count
+  FROM payments
+  GROUP BY payment_method
+  ORDER BY transaction_count DESC
+  LIMIT 10;
+  ```
+* **Execution Output:**
+  ```text
+  [('google_pay', 3317), ('apple_pay', 3301), ('paypal', 3215), ('debit_card', 3138), ('credit_card', 3102)]
+  ```
+* **Final Response:** Friendly breakdown explaining that the database supports Google Pay, Apple Pay, PayPal, Debit Card, and Credit Card, along with their transaction counts.
+
+---
+
+### Test Case 2: ELT Route (API Extraction & Loading)
+```python
+response = data_agent.invoke({
+    "messages": [HumanMessage(content="I want to extract the data from the API endpoint 'https://pokeapi.co/api/v2/pokemon' and save it to data/extract folder in the csv folder")],
+    "route_response": ""
+})
+```
+* **Router Decision:** `"etl"`
+* **Tool Triggered:** `extract_load_tool`
+* **Execution Output:**
+  ```text
+  Data successfully extracted and saved to C:\Users\MUSAB\Desktop\AI-Data-Agent\data\extract\extracted_data.csv
+  ```
+* **Final Response:** Confirms data was extracted and saved in CSV format at the requested directory.
+
+---
+
+### Test Case 3: SQL Security Guardrail (Blocking Unsafe Query)
+```python
+response = data_agent.invoke({
+    "messages": [HumanMessage(content="Delete all cancelled rides from the rides table")],
+    "route_response": ""
+})
+```
+* **Router Decision:** `"sql"`
+* **Generated SQL:** `DELETE FROM rides WHERE status = 'cancelled';`
+* **Judge Decision:** `answer: "No"`, `comments: "Contains destructive DELETE command."`
+* **Branching:** Diverts to `canceled_sql`.
+* **Final Response:** *"The generated SQL query was deemed unsafe to execute. The reason provided by the judge is: Contains destructive DELETE command. Therefore, the SQL query will not be executed."* (Database remains untouched).
 
 ---
 
@@ -71,19 +141,20 @@ Here is the compiled LangGraph workflow:
 ```text
 AI-Data-Agent/
 ├── Model/
-│   └── Schema.py            # Pydantic schemas for agent states & judge
+│   └── Schema.py            # Pydantic schemas for states, router & judge
 ├── agents/
-│   ├── sql_analyst.py       # SQL Analyst LangGraph workflow (Working!)
-│   ├── etl_analyst.py       # ELT Analyst ReAct agent (Working!)
-│   └── data_agent.py        # Main router agent (up next)
+│   ├── data_agent.py        # Top-level Router agent (Working!)
+│   ├── sql_analyst.py       # SQL Analyst LangGraph pipeline (Working!)
+│   └── etl_analyst.py       # ELT Analyst ReAct agent (Working!)
 ├── utils/
-│   ├── database.py          # Postgres connection & query runner
-│   ├── elt_tools.py         # ELT helper class (API extraction, code execution)
+│   ├── database.py          # Postgres connection & query execution
+│   ├── elt_tools.py         # API extraction, normalization & code execution
 │   └── llm_pick.py          # Helper to pick Gemini models (low/med/high)
-├── data/                    # Sample CSV datasets & extract output folders
-├── feed_db.py               # Script to load CSV data into Postgres
-├── sql_analyst_graph.png    # Mermaid graph of SQL Analyst
-├── etl_analyst_graph.png    # Mermaid graph of ELT Analyst
+├── data/                    # Sample datasets (users, rides, payments, etc.)
+├── feed_db.py               # Loads CSV datasets into PostgreSQL
+├── data_agent_graph.png     # Visual DAG of Data Agent Router
+├── sql_analyst_graph.png    # Visual DAG of SQL Analyst
+├── etl_analyst_graph.png    # Visual DAG of ELT Analyst
 └── README.md
 ```
 
@@ -91,14 +162,14 @@ AI-Data-Agent/
 
 ## Quick Setup & Running
 
-1. **Setup environment & dependencies**
+1. **Install dependencies**
    ```bash
    uv sync
-   # or with standard venv:
+   # or
    # pip install -r requirements.txt
    ```
 
-2. **Setup `.env`**
+2. **Configure `.env`**
    ```env
    GEMINI_API_KEY=your_key_here
    DB_HOST=localhost
@@ -108,18 +179,16 @@ AI-Data-Agent/
    DB_PASSWORD=your_password
    ```
 
-3. **Run the SQL Analyst**
+3. **Run the Full System (Router Agent)**
    ```bash
-   python agents/sql_analyst.py
+   python agents/data_agent.py
    ```
 
-4. **Run the ELT Analyst**
+4. **Run Individual Agents Directly**
    ```bash
+   # Test SQL Analyst only
+   python agents/sql_analyst.py
+
+   # Test ELT Analyst only
    python agents/etl_analyst.py
    ```
-
----
-
-## What's Next 🚀
-
-- **Main Data Agent (`agents/data_agent.py`)**: The top-level router node that takes any incoming user request and decides whether to send it to the **SQL Analyst** (for database questions) or the **ELT Analyst** (for API ingestion and data file transformations).
